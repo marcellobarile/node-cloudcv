@@ -1,5 +1,5 @@
 {
-  "name": "CVaaS",
+  "name": "node-cloudcv",
   "description": "CloudCV Node.js API",
   "version": "1.0.0",
   "main" : "./libs/CloudCv.js",
