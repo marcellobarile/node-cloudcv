@@ -19,6 +19,7 @@ function onConnect() {
   self.client.emit('getsocketid', 'socketid')
 }
 function onResponse(message) {
+  debug('Socket response', message)
   message = message[0]
 
   if ('socketid' in message && self.id < 0) {
@@ -95,35 +96,35 @@ SocketClient.prototype.connect = function(opts) {
 
   this.client = io.connect(protocol + '://' + domain + ':' + port, options);
   this.client.on('connect', function(){
-    debug("Connected", arguments)
+    debug('Connected', arguments)
     onConnect(arguments)
   });
   this.client.on('connecting', function(){
-    debug("Connecting", arguments)
+    debug('Connecting', arguments)
   });
   this.client.on('connect_failed', function(){
-    debug("Connect Failed", arguments)
+    debug('Connect Failed', arguments)
     onError(arguments)
   });
   this.client.on('message', function(){
     onResponse(arguments)
   });
   this.client.on('reconnecting', function(){
-    debug("Reconnecting", arguments)
+    debug('Reconnecting', arguments)
   });
   this.client.on('reconnect_failed', function(){
-    debug("Reconnecting failed", arguments)
+    debug('Reconnecting failed', arguments)
     onError(arguments)
   });
   this.client.on('connect_error', function(){
-    debug("Error", arguments)
+    debug('Error', arguments)
     onError(arguments)
   });
   this.client.on('close', function(){
-    debug("Server Closed", arguments)
+    debug('Server Closed', arguments)
   });
   this.client.on('disconnect', function () {
-    debug("Disconnected", arguments)
+    debug('Disconnected', arguments)
   });
 }
 SocketClient.prototype.disconnect = function() {

@@ -1,19 +1,20 @@
 var self
-var debug         = require('debug')('CloudCv')
-var fs            = require('fs')
-var path          = require('path')
-var http          = require('http')
-var request       = require('request')
-var querystring   = require('querystring')
-var SocketClient  = require('./SocketClient')
-var Task          = require('./Task')
-var utils         = require('./Utils')
+const debug         = require('debug')('CloudCv')
+const fs            = require('fs')
+const path          = require('path')
+const http          = require('http')
+const request       = require('request')
+const querystring   = require('querystring')
+const SocketClient  = require('./SocketClient')
+const Task          = require('./Task')
+const utils         = require('./Utils')
+const EventEmitter  = require('events').EventEmitter
 
 var latestTask
 var tasks = []
 
-var socketHost = 'cloudcv.org'
-var socketPort = 80
+const socketHost = 'cloudcv.org'
+const socketPort = 80
 
 global.cloudcvBaseUrl = 'http://cloudcv.org'
 global.uploadDir = __dirname + '/tmp/'
@@ -22,20 +23,22 @@ function CloudCv() {
   debug('Initing CloudCv')
 
   self = this
+  self.emitter = new EventEmitter()
 
   if (!self.socket) {
     self.socket = new SocketClient()
-    self.socket.emitter.on('socketId', onSocketId)
-    self.socket.emitter.on('jobId', onJobId)
-    self.socket.emitter.on('name', onName)
-    self.socket.emitter.on('done', onDone)
-    self.socket.emitter.on('jobInfo', onJobInfo)
-    self.socket.emitter.on('data', onData)
-    self.socket.emitter.on('picture', onPicture)
-    self.socket.emitter.on('mat', onMat)
+    self.socket.emitter.on('socketId',    onSocketId)
+    self.socket.emitter.on('jobId',       onJobId)
+    self.socket.emitter.on('name',        onName)
+    self.socket.emitter.on('done',        onDone)
+    self.socket.emitter.on('jobInfo',     onJobInfo)
+    self.socket.emitter.on('data',        onData)
+    self.socket.emitter.on('picture',     onPicture)
+    self.socket.emitter.on('mat',         onMat)
     self.socket.emitter.on('requestData', onRequestData)
-    self.socket.emitter.on('exit', onExit)
-    self.socket.emitter.on('error', onSocketError)
+    self.socket.emitter.on('exit',        onExit)
+    self.socket.emitter.on('error',       onSocketError)
+
     self.socket.connect({
       host: socketHost,
       port: socketPort
@@ -44,10 +47,12 @@ function CloudCv() {
 }
 
 function onSocketId(e) {
-  debug('Obtained sockedIt::' + self.socket.id)
+  debug('Obtained socketId::' + self.socket.id)
+  self.emitter.emit('onSocketId')
 }
 
 function onTaskUpload(e) {
+  debug('onTaskUplad')
   var taskId = e.taskId
   var resBody = e.body
   var task = getTaskByTaskId(taskId)
@@ -57,17 +62,21 @@ function onTaskUpload(e) {
 }
 
 function onTaskDone(e) {
+  debug('onTaskDone')
   debug(e)
   removeTask(e.taskId)
 }
 
 function onJobId(e) {
+  debug('onJobId')
   debug(e)
   var val = e.value
 }
 
 function onName(e) {
+  debug('onName')
   debug(e)
+
   var val = e.value
     // TODO: Sometimes the latestTask is not ready, plus, check if the emit is disabled on the python version
     //var method = latestTask.method
@@ -77,13 +86,17 @@ function onName(e) {
 }
 
 function onDone(e) {
+  debug('onDone')
   debug(e)
+
     /* Maybe this is not working properly */
   var method = latestTask.method
   self.socket.client.emit('send_message', method)
 }
 
 function onJobInfo(e) {
+  debug('onJobInfo')
+
   var val = e.value
   var token = val.token
   var task = getTaskByToken(token)
@@ -99,6 +112,8 @@ function onJobInfo(e) {
 }
 
 function onData(e) {
+  debug('onData')
+
   if (e.value != '') {
     var val = JSON.parse(e.value)
     for (var i in val) {
@@ -115,6 +130,8 @@ function onData(e) {
 }
 
 function onPicture(e) {
+  debug('onPicture')
+
   var val = e.value
   var jobid = val.match(/anonymous\/(.*)\/results/)[1]
 
@@ -133,6 +150,8 @@ function onPicture(e) {
 }
 
 function onMat(e) {
+  debug('onMat')
+
   var val = e.value
   var dest = path.join(global.resultsDir, self.socket.id + '.txt')
   var file = fs.createWriteStream(dest);
@@ -224,25 +243,36 @@ CloudCv.prototype.getStatus = function() {
   if (this.socket.token == '') {
     return {
       status: 'error',
+      code: CloudCv.ERRORS.NO_SOCKET_TOKEN,
       message: 'The Cloud is not ready yet. Please, retry in few seconds.'
     }
   }
   if (this.socket.id == -1) {
     return {
       status: 'error',
+      code: CloudCv.ERRORS.NO_SOCKET_ID,
       message: 'There are some unexpected issues. Please, retry later. We are sorry.'
     }
   }
   return {
-    status: 'ok'
+    status: 'ok',
+    code: CloudCv.STATUS.OK
   }
 }
 CloudCv.prototype.classify = function(files, areImagedata, cb) {
   debug('Called classify method')
 
+  var self = this
   var status = this.getStatus()
-  if (status['status'] == 'error') {
-    cb(status)
+  if (status.code != CloudCv.STATUS.OK) {
+    debug('Socket not ready, waiting for it...')
+    if (status.code == CloudCv.ERRORS.NO_SOCKET_ID || status.code == CloudCv.ERRORS.NO_SOCKET_TOKEN) {
+      this.emitter.on('onSocketId', function onSocketReady() {
+        debug('Socket ready. Retry...')
+        self.classify(files, areImagedata, cb)
+      })
+    }
+    return false
   }
 
   var task = new Task({
@@ -264,14 +294,23 @@ CloudCv.prototype.classify = function(files, areImagedata, cb) {
       cb({}, 'something wrong just happened saving the file')
     })
   }
+
   task.run('classify', files, cb)
 }
 CloudCv.prototype.imageStitch = function(files, areImagedata, cb) {
   debug('Called image stitch method')
 
+  var self = this
   var status = this.getStatus()
-  if (status['status'] == 'error') {
-    cb(status)
+  if (status.code != CloudCv.STATUS.OK) {
+    debug('Socket not ready, waiting for it...')
+    if (status.code == CloudCv.ERRORS.NO_SOCKET_ID || status.code == CloudCv.ERRORS.NO_SOCKET_TOKEN) {
+      this.emitter.on('onSocketId', function onSocketReady() {
+        debug('Socket ready. Retry...')
+        self.imageStitch(files, areImagedata, cb)
+      })
+    }
+    return false
   }
 
   var task = new Task({
@@ -283,6 +322,7 @@ CloudCv.prototype.imageStitch = function(files, areImagedata, cb) {
   })
   tasks.push(task)
   task.emitter.on('upload', onTaskUpload)
+  task.emitter.on('done', onTaskDone)
 
   if (areImagedata) {
     var _files = files
@@ -299,9 +339,17 @@ CloudCv.prototype.imageStitch = function(files, areImagedata, cb) {
 CloudCv.prototype.objectDetection = function(files, areImagedata, cb) {
   debug('Called object detection method')
 
+  var self = this
   var status = this.getStatus()
-  if (status['status'] == 'error') {
-    cb(status)
+  if (status.code != CloudCv.STATUS.OK) {
+    debug('Socket not ready, waiting for it...')
+    if (status.code == CloudCv.ERRORS.NO_SOCKET_ID || status.code == CloudCv.ERRORS.NO_SOCKET_TOKEN) {
+      this.emitter.on('onSocketId', function onSocketReady() {
+        debug('Socket ready. Retry...')
+        self.objectDetection(files, areImagedata, cb)
+      })
+    }
+    return false
   }
 
   var models = 'all'
@@ -315,6 +363,7 @@ CloudCv.prototype.objectDetection = function(files, areImagedata, cb) {
   })
   tasks.push(task)
   task.emitter.on('upload', onTaskUpload)
+  task.emitter.on('done', onTaskDone)
 
   if (areImagedata) {
     var _files = files
@@ -331,9 +380,17 @@ CloudCv.prototype.objectDetection = function(files, areImagedata, cb) {
 CloudCv.prototype.features = function(files, areImagedata, cb) {
   debug('Called Features method')
 
+  var self = this
   var status = this.getStatus()
-  if (status['status'] == 'error') {
-    cb(status)
+  if (status.code != CloudCv.STATUS.OK) {
+    debug('Socket not ready, waiting for it...')
+    if (status.code == CloudCv.ERRORS.NO_SOCKET_ID || status.code == CloudCv.ERRORS.NO_SOCKET_TOKEN) {
+      this.emitter.on('onSocketId', function onSocketReady() {
+        debug('Socket ready. Retry...')
+        self.features(files, areImagedata, cb)
+      })
+    }
+    return false
   }
 
   var task = new Task({
@@ -346,6 +403,7 @@ CloudCv.prototype.features = function(files, areImagedata, cb) {
   })
   tasks.push(task)
   task.emitter.on('upload', onTaskUpload)
+  task.emitter.on('done', onTaskDone)
 
   if (areImagedata) {
     var _files = files
@@ -359,4 +417,11 @@ CloudCv.prototype.features = function(files, areImagedata, cb) {
   }
   task.run('features', files, cb)
 }
+
+CloudCv.ERRORS = CloudCv.STATUS = {}
+CloudCv.ERRORS.NO_SOCKET_ID = 0
+CloudCv.ERRORS.NO_SOCKET_TOKEN = 1
+CloudCv.ERRORS.UNKOWN = 2
+CloudCv.STATUS.OK = -1
+
 module.exports = CloudCv
