@@ -52,7 +52,7 @@ function onSocketId(e) {
 }
 
 function onTaskUpload(e) {
-  debug('onTaskUplad')
+  debug('onTaskUpload')
   var taskId = e.taskId
   var resBody = e.body
   var task = getTaskByTaskId(taskId)
